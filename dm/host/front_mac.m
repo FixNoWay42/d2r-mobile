@@ -34,15 +34,18 @@ static NSView *g_view;
 // Test switch DM_TEST_SCREEN_ASPECT=<w>x<h>: treat the main screen as this ratio (16x9 = the external 16:9 screen case)
 static double g_aspect = 16.0 / 9;   // 游戏画面比例（宽 ÷ 高） | aspect ratio of the game picture (width / height)
 static int g_full;                    // 1 = 真全屏已开 | 1 = true full screen is on
-// Mac App 的出图分辨率（像素）：按屏幕原生像素算，0 = 不覆盖（走原来的 16:9 常数，命令行宿主与 iOS 包用）。
-// 原先固定 1600 宽，全屏 drawable 是 3456×2168 像素，等于把 1600 宽的图放大 2.16 倍上屏——画面糊。
-// 现在按屏幕像素出图：全屏 1:1，窗口态超采样（downscale），都清晰。
-// 上限：游戏在窗口初始化时用这个值建交换链（main+0x211da30），之后只接受不超过它的新值，所以启动时给的就是最大那个。
-// Mac App render resolution in pixels, computed from the screen's native pixels; 0 = do not override (the old 16:9 constants, used by the command-line host and the iOS package).
-// It used to be a fixed 1600 wide, while the full-screen drawable is 3456x2168 pixels - a 2.16x upscale, i.e. the blurry picture.
-// Now it renders at screen pixels: 1:1 in full screen and supersampled (downscaled) windowed, both sharp.
-// Upper bound: the game creates its swapchain from this value at window init (main+0x211da30) and afterwards only accepts values not exceeding it, so the value given at startup is the largest one.
-static int g_res_w, g_res_h;
+// 出图分辨率（像素）：按「窗口 / 全屏画布的实际大小」算，0 = 不覆盖（走原来的 16:9 常数，命令行宿主与 iOS 包用）。
+// 原先固定 1600 宽：全屏 drawable 是 3456×2168 像素，等于把 1600 宽的图放大 2.16 倍上屏——画面糊。
+// 现在按画布像素出图：全屏 1:1，窗口态也 1:1（窗口小的时候不会拿大分辨率白烧显卡）。
+// 上限 RES_CAP_W：游戏显存预算撑不住更宽的渲染目标，超了进全屏必崩（见 full_setup）。
+// 上限只在启动时定（游戏用启动值建交换链，之后只接受不超过它的值），所以启动给上限值、之后按窗口大小在它之内切。
+// Mac App render resolution in pixels, from the window / full-screen canvas' actual size; 0 = do not override (the old 16:9 constants, used by the command-line host and the iOS package).
+// It used to be a fixed 1600 wide: the full-screen drawable is 3456x2168 pixels, a 2.16x upscale - i.e. the blurry picture.
+// Now it renders at canvas pixels: 1:1 in full screen, and 1:1 windowed too (a small window no longer burns the GPU on a big resolution).
+// Cap RES_CAP_W: the game's video-memory budget cannot hold a wider render target, and going full screen then crashes (see full_setup).
+// The cap is only fixed at startup (the game builds its swapchain from the startup value and afterwards only accepts values not exceeding it), so startup gives the cap and later switches stay within it.
+static int g_res_w, g_res_h;          // 此刻该给的出图分辨率 | the render resolution due right now
+static int g_res_cap_w, g_res_cap_h;  // 启动时定的上限（交换链尺寸） | the cap fixed at startup (the swapchain size)
 #define RES_CAP_W 3392   // 出图宽上限：游戏显存预算撑得住的边界（3393 必崩，见下） | render width cap: the edge the game's video-memory budget holds (3393 always crashes, see below)
 static void full_setup(void) {
     if (!getenv("DM_APP") || getenv("DM_GAME_RES")) return;
@@ -66,9 +69,10 @@ static void full_setup(void) {
     // Anything wider is clamped to 3392 with the height following the screen's aspect, so the picture keeps its ratio and cannot crash.
     g_res_w = (int)(llround(w * scale)) & ~1; g_res_h = (int)(llround(w / g_aspect * scale)) & ~1;
     if (g_res_w > RES_CAP_W) { g_res_w = RES_CAP_W; g_res_h = (int)(llround(g_res_w / g_aspect)) & ~1; }
+    g_res_cap_w = g_res_w; g_res_cap_h = g_res_h;   // 启动值 = 交换链上限，之后只能往小切 | startup value = the swapchain cap; later switches only go smaller
     { const char *r = getenv("DM_TEST_RES"); unsigned rw, rh;   // 测试开关：覆盖出图分辨率，仍走真全屏这条路（DM_GAME_RES 会让 full_setup 整个跳过，量不到这条路上的上限） | Test switch: override the render resolution but still take the true-full-screen path (DM_GAME_RES makes full_setup skip entirely, so it cannot measure this path's ceiling)
-      if (r && sscanf(r, "%ux%u", &rw, &rh) == 2 && rw && rh) { g_res_w = (int)rw; g_res_h = (int)rh; } }
-    LOG("画面：主屏全屏内容区 %.0fx%.0f（比例 %.3f）比 16:9 窄 → 真全屏：窗口锁这个比例，局内铺满、界面贴底；出图 %dx%d 像素（屏幕原生，宽上限 %d）", w, h, g_aspect, g_res_w, g_res_h, RES_CAP_W);
+      if (r && sscanf(r, "%ux%u", &rw, &rh) == 2 && rw && rh) { g_res_w = (int)rw; g_res_h = (int)rh; g_res_cap_w = g_res_w; g_res_cap_h = g_res_h; } }
+    LOG("画面：主屏全屏内容区 %.0fx%.0f（比例 %.3f）比 16:9 窄 → 真全屏：窗口锁这个比例，局内铺满、界面贴底；出图上限 %dx%d 像素（宽上限 %d）", w, h, g_aspect, g_res_w, g_res_h, RES_CAP_W);
 }
 // 游戏画面在视图里的位置：按游戏画面比例放进视图（比例对得上就是整个视图；对不上的四周留黑边）
 // Where the game picture sits in the view: fitted into the view by the picture's aspect ratio (if the ratios match, the whole view; otherwise black bars around)
@@ -83,6 +87,22 @@ static void layout_game(void) {
     CGFloat sc = g_view.window.backingScaleFactor ?: 2;   // 画布跟着改：作为子层的 CAMetalLayer 改 frame 不会自己改 drawableSize，原先进全屏后一直用窗口态的画布放大显示（发糊） | the canvas follows: a CAMetalLayer used as a sublayer does not change its drawableSize when its frame changes, so after going full screen it used to keep the windowed canvas and scale it up (blurry)
     [CATransaction begin]; [CATransaction setDisableActions:YES]; g_layer.frame = r; g_layer.contentsScale = sc; g_layer.drawableSize = CGSizeMake(round(r.size.width * sc), round(r.size.height * sc)); [CATransaction commit];
     LOG("窗口：内容区 %.0f×%.0f，游戏画面 %.0f×%.0f 放在 (%.0f,%.0f)", g_view.bounds.size.width, g_view.bounds.size.height, r.size.width, r.size.height, r.origin.x, r.origin.y);
+}
+// 窗口尺寸变了（拉大小 / 进出全屏）：把出图分辨率跟着切到画布的实际像素，够清晰又不白烧显卡。
+// 只往小切也安全：交换链是启动时按上限建的，游戏接受不超过上限的新值。
+// The window size changed (resize / enter or leave full screen): retarget the render resolution to the canvas' actual pixels - sharp enough without burning the GPU for nothing.
+// Only shrinking is safe too: the swapchain was built at the cap on startup, and the game accepts any new value not exceeding it.
+static void retarget_res(void) {
+    if (!g_full || g_res_cap_w <= 0) return;   // 没开真全屏：那份固定常数本来就是对的 | true full screen off: the fixed constants are right
+    NSRect r = game_rect(); CGFloat sc = g_view.window.backingScaleFactor ?: 2;
+    int w = (int)(llround(r.size.width * sc)) & ~1, h = (int)(llround(r.size.height * sc)) & ~1;
+    if (w <= 0 || h <= 0) return;
+    if (w > g_res_cap_w) { double k = (double)g_res_cap_w / w; w = g_res_cap_w; h = (int)(llround(h * k)) & ~1; }   // 不超过启动上限 | never above the startup cap
+    if (w > RES_CAP_W) { double k = (double)RES_CAP_W / w; w = RES_CAP_W; h = (int)(llround(h * k)) & ~1; }
+    if (w == g_res_w && h == g_res_h) return;
+    g_res_w = w; g_res_h = h;
+    void dm_oe_res_changed(void); dm_oe_res_changed();   // 推 31，游戏重读参数位换出图尺寸 | push 31 so the game re-reads the parameter slot and switches its render size
+    LOG("画面：出图分辨率跟窗口切到 %dx%d", w, h);
 }
 // 退出（关窗口 / ⌘Q / 菜单）：有局在就先请游戏走一次它自己的存盘并等存档提交（做法同 iOS 壳进后台），最多 3 秒，再有序收尾。
 // 暂停菜单 / 大秘境面板开着时游戏停拍：冻住世界、临时放开暂停存这一次（diag.c dm_save_wait，与 iOS 进后台同一个函数）；读取画面里等它进到局内再请。3 秒到了还没有提交就照实记「未存盘退出」
@@ -138,6 +158,7 @@ static NSString *share_logs(NSString *to) {
     return nil;
 }
 static void share_logs_ui(void) { NSString *e = share_logs(nil); if (e) { LOG("【红】分享日志：打包失败 %s", e.UTF8String); NSAlert *a = [NSAlert new]; a.messageText = @(ui("dmAppShareFail")); a.informativeText = e; [a addButtonWithTitle:@(ui("dmAppOK"))]; [a runModal]; } }
+static void retarget_res(void);
 @interface DmWinCtl : NSObject <NSWindowDelegate> @end
 // 窗口所在那块屏的名字与刷新率（主线程读 AppKit，存一份给出图线程）：出图节拍按它选整除的帧率（nvn_mtl.m mtl_pace_hz）。
 // 窗口换屏、屏幕参数变（改刷新率、接拔显示器）时重读。刷新率取显示模式的值，内建屏读不到（0）时取屏幕的最高帧率
@@ -158,8 +179,10 @@ double front_display_refresh(char *name, size_t n) {
 }
 @implementation DmWinCtl
 - (BOOL)windowShouldClose:(NSWindow *)w { (void)w; app_quit("关窗口"); return NO; }
-- (void)windowDidResize:(NSNotification *)n { (void)n; layout_game(); }
-- (void)windowDidChangeBackingProperties:(NSNotification *)n { (void)n; layout_game(); }
+- (void)windowDidResize:(NSNotification *)n { (void)n; layout_game(); retarget_res(); }
+- (void)windowDidEnterFullScreen:(NSNotification *)n { (void)n; layout_game(); retarget_res(); }
+- (void)windowDidExitFullScreen:(NSNotification *)n { (void)n; layout_game(); retarget_res(); }
+- (void)windowDidChangeBackingProperties:(NSNotification *)n { (void)n; layout_game(); retarget_res(); }
 - (void)windowDidChangeScreen:(NSNotification *)n { (void)n; screen_note(); }
 - (void)quit:(id)s { (void)s; app_quit("菜单退出"); }
 - (void)keys:(id)s { (void)s; show_keys(); }
@@ -246,6 +269,9 @@ void front_run(void (*guest)(void)) {
         { void dm_gamepad_start(void (*on_mode)(int pad)); dm_gamepad_start(NULL); }   // 手柄（与 iOS 壳共用 ios/Sources/dm_gamepad.m）：连上即用，与键盘并存 | Gamepad (ios/Sources/dm_gamepad.m, shared with the iOS shell): works as soon as it is connected, alongside the keyboard
         [win makeKeyAndOrderFront:nil];
         screen_note();
+        // 启动时出图给的是上限（游戏按它建交换链），窗口态用不到那么大：等游戏起好再切到窗口的实际像素，省显卡
+        // Startup gives the cap (the game builds its swapchain from it), but a window does not need that much: once the game is up, switch to the window's actual pixels to save the GPU
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ retarget_res(); });
         [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationDidChangeScreenParametersNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) { (void)n; screen_note(); }];
         [NSApp activateIgnoringOtherApps:YES];
         [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp handler:^NSEvent *(NSEvent *e) {
