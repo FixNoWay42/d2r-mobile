@@ -30,7 +30,7 @@ MIT · 中文 / English · iOS 26+ / macOS 26+；老接口版支持 iOS 18+ / ma
 用 https://github.com/d2r-mobile/d2r-mobile 里的 d2r-mobile skill，帮我把 D2R Mobile 装到我的 iPhone 上。游戏文件在 <路径>。
 ```
 
-它会检查你的电脑、准备工作区、签名装机，再把游戏资源拷进手机。只有两件事会停下来问你：Apple 签名信息，以及需要 `sudo` 的安装要不要做。skill 在 [skills/d2r-mobile/SKILL.md](skills/d2r-mobile/SKILL.md)，两个助手都会通过 `.claude/skills/` 和 `.agents/skills/` 自己找到它。想手动做，看下面的[开始使用](#开始使用)。
+它会检查你的电脑、准备工作区、签名装机，再把游戏资源拷进手机。只有两件事会停下来问你：Apple 签名信息，以及需要 `sudo` 的安装要不要做。skill 在 [skills/d2r-mobile/SKILL.md](skills/d2r-mobile/SKILL.md)，两个助手都会通过 `.claude/skills/` 和 `.agents/skills/` 自己找到它。手动构建与安装步骤见[开始使用](#开始使用)。
 
 ## 为什么玩起来像原生游戏
 
@@ -205,7 +205,7 @@ flowchart LR
 |---|---|---|---|
 | **iPhone / iPad，A17 Pro 及以后**（iPhone 15 Pro 起、iPhone 16 起、M 系列芯片的 iPad） | 直接玩 | iOS 26 及以上用缺省的壳 / 缺省构建；iOS 18 – 25 用 iOS 18 的壳 / [老接口版](docs/OLDER_SYSTEMS.zh-CN.md) | 主力机型，日常在玩 |
 | **iPhone / iPad，A16 及更早**（iPhone 14 全系、iPhone 15 / 15 Plus、iPhone 13 系列等） | 可以玩，多一步 | 按 [docs/LEGACY_DEVICES.zh-CN.md](docs/LEGACY_DEVICES.zh-CN.md) 用自己的游戏文件做一份老机型补充包，做安装包时带上它；系统同上一行分 iOS 26 / iOS 18 – 25 | 已有玩家实测：iPhone 14 Pro Max（A16，6 GB）60 帧；iPhone 13 Pro Max（A15，6 GB）30 帧档 |
-| **4 GB 内存的设备**（如 iPad Air 第 4 代） | 暂不支持（在优化内存，有进展更新） | — | 已有玩家实测：iPad Air 4（A14，4 GB）带上老机型补充包后，启动几秒即因整机内存不足被系统结束 |
+| **4 GB 内存的设备**（如 iPad mini 第 6 代、iPad Air 第 4 代） | 能进游戏，内存很紧（在继续优化内存） | 同 A16 及更早那一行（带老机型补充包） | 已有玩家实测：iPad mini 6（A15，4 GB，iPadOS 27）第一幕实际玩了几分钟，画质自动降低后 50–58 帧，但一直收到系统内存告警、离系统内存上限只剩约 560 MB，怪多特效多的场景可能被系统结束；更早的版本上 iPad Air 4（A14，4 GB）启动几秒即被系统结束 |
 | **A14 芯片、6 GB 及以上内存**（如 iPhone 12 Pro / 12 Pro Max） | 尚无报告 | 同 A16 及更早那一行 | 欢迎试过的人开 Issue 告诉我们结果 |
 | **A13 及更早的芯片**（如 iPhone 11 系列、2020 年的 iPad Pro） | 不支持 | — | 图形芯片不支持 Metal 3（玩家在 iPad Pro A12Z 上实测；苹果依据见表上方）；App 启动时会直接提示，不会闪退 |
 | **Mac，Apple 芯片** | 直接玩（原生 macOS App） | macOS 26 及以上用缺省出法；macOS 15 – 25 用[老接口出法](docs/OLDER_SYSTEMS.zh-CN.md)。键盘、鼠标、手柄都能玩，各自能做什么见 [docs/MAC.zh-CN.md](docs/MAC.zh-CN.md) | 已有玩家在 macOS 15.7.7 上实际玩过老接口版 |
