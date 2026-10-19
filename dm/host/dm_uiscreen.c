@@ -87,8 +87,15 @@ void dm_uiscreen_res_reread(void) { uint8_t *b = main_base(); int rw = atomic_lo
 // When handling 31 (main+0xe10df0–0xe10e0c) the game only accepts new values where "both width and height do not exceed the size at window initialization [main+0x211da30]": the window texture is created once from the startup parameter slot, and afterwards only the render region inside it changes.
 // So give the screen's native value (the largest one) at startup, and switch to the front end's 16:9 once window initialization is done and the per-frame UI site first runs.
 static _Atomic int g_world, g_res_live;
+// 前端页（主菜单、选角等）也按屏幕原生比例出图，不再强制 16:9 留边：Mac App 缺省打开，界面矩形由 yoff() 居中，
+// 于是 3D 铺满整屏、UI 仍是居中 16:9 块，与局内那套完全一样。关掉：DM_FE_FILL=0。
+// 只对 Mac App 生效（DM_APP）：iOS 包的前端页仍是 16:9 留边（真机真玩家已按那个口径验收，不改）。
+// Front-end pages (main menu, character select) also render at the screen's native ratio instead of being forced to 16:9 with bars.
+// On by default in the Mac App; the UI rectangle is centered by yoff(), so 3D fills the screen while the UI stays a centered 16:9 block, exactly as in a run. Turn off with DM_FE_FILL=0.
+// Mac App only (DM_APP): the iOS package keeps 16:9 letterbox on front-end pages (verified on real devices with real players; not changed).
+static int fe_fill(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_FE_FILL"); v = e && *e ? *e != '0' : getenv("DM_APP") != NULL; } return v; }
 uint64_t dm_game_res(int docked) { uint64_t r = front_game_res(docked); uint32_t w = (uint32_t)r, h = (uint32_t)(r >> 32);   // 先问前端：iOS 前端在第一次被问时才决定开不开真全屏 | Ask the front end first: the iOS front end only decides whether to turn on true fullscreen the first time it is asked
-    if (atomic_load(&g_res_live) && mode() != DM_UISCREEN_OFF && !atomic_load(&g_world) && (uint64_t)w * 9 < (uint64_t)h * 16) h = (uint32_t)((uint64_t)w * 9 / 16) & ~1u;
+    if (atomic_load(&g_res_live) && mode() != DM_UISCREEN_OFF && !atomic_load(&g_world) && !fe_fill() && (uint64_t)w * 9 < (uint64_t)h * 16) h = (uint32_t)((uint64_t)w * 9 / 16) & ~1u;
     return (uint64_t)h << 32 | w; }
 
 void dm_uiscreen_pump(void) {
@@ -97,7 +104,7 @@ void dm_uiscreen_pump(void) {
       int first = !atomic_exchange(&g_res_live, 1);
       if ((atomic_exchange(&g_world, world) != world || (first && !world)) && mode() != DM_UISCREEN_OFF) { LOG("界面画面：%s → 游戏分辨率切到 %u x %u", world ? "玩家单位建立" : first ? "窗口已建好、在前端" : "玩家单位销毁", (unsigned)dm_game_res(1), (unsigned)(dm_game_res(1) >> 32)); dm_oe_res_changed(); } }
     static int reg; if (!reg) { reg = 1; if (gate_obs_present(OBS_UI_PROJECT)) { gate_obs_set(OBS_UI_PROJECT, ui_project_obs); atomic_store(&g_proj_on, 1); } } int32_t *g = (int32_t *)(b + 0x211da38); int m = mode(), rw = atomic_load(&g_rw);
-    if (!atomic_load(&g_world) && m != DM_UISCREEN_OFF) return;   // 不在局里：游戏自己按 16:9 出图，这对量不改写（出局那一下的写回见 dm_uiscreen_res_reread） | Not in a run: the game renders at 16:9 by itself, so this pair of values is not rewritten (for the write-back at the moment of leaving a run see dm_uiscreen_res_reread)
+    if (!atomic_load(&g_world) && m != DM_UISCREEN_OFF && !fe_fill()) return;   // 不在局里：游戏自己按 16:9 出图，这对量不改写（出局那一下的写回见 dm_uiscreen_res_reread） | Not in a run: the game renders at 16:9 by itself, so this pair of values is not rewritten (for the write-back at the moment of leaving a run see dm_uiscreen_res_reread)
     if (m == DM_UISCREEN_OFF) { if (rw) { if (g[0] == rw && g[1] == atomic_load(&g_uh)) g[1] = atomic_load(&g_rh); atomic_store(&g_rw, 0); LOG("界面画面：关掉，屏幕高写回 %d", g[1]); } return; }   // 没打开过就什么都不碰 | If it was never turned on, touch nothing
     int w = g[0], h = g[1]; if (w <= 0 || h <= 0) return;
     if (rw && w == rw && h == atomic_load(&g_uh)) return;   // 还是我们上次写的值 | Still the value we wrote last time

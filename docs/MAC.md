@@ -61,7 +61,7 @@ With a keyboard, the button prompts on screen (the hint bar at the bottom, skill
 
 **Creating a character, start to finish**: on the main menu press `=` (or click "New Character") → choose a class with the arrow keys and press Return (or click that class's figure) → on the mode page press Return or Space → on the naming page press Return to open the input box, type, Return → press Return once more to create.
 
-A gamepad works as soon as it is connected, alongside the keyboard. The menu bar has View → Full Screen (⌃⌘F) and Quit (⌘Q). The window can be resized freely. In game the picture fills the window or screen at its own aspect ratio (on a 16:10 MacBook both windowed and full screen are filled, with the interface along the bottom, centred while a large panel is open); the front-end pages such as the main menu and character select stay 16:9 with bars above and below.
+A gamepad works as soon as it is connected, alongside the keyboard. The menu bar has View → Full Screen (⌃⌘F) and Quit (⌘Q). The window can be resized freely. Both windowed and full screen fill the screen at its own aspect ratio: in game the 3D fills it with the interface along the bottom (centred while a large panel is open); on the front-end pages such as the main menu and character select the 3D also fills it, with the interface kept as a centred 16:9 block and no bars above or below. To get the old letterboxed look back, set the environment variable `DM_FE_FILL=0` before launching.
 
 ## Mouse
 
