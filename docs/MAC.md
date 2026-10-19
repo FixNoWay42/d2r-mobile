@@ -63,6 +63,8 @@ With a keyboard, the button prompts on screen (the hint bar at the bottom, skill
 
 A gamepad works as soon as it is connected, alongside the keyboard. The menu bar has View → Full Screen (⌃⌘F) and Quit (⌘Q). The window can be resized freely. Both windowed and full screen fill the screen at its own aspect ratio: in game the 3D fills it with the interface along the bottom (centred while a large panel is open); on the front-end pages such as the main menu and character select the 3D also fills it, with the interface kept as a centred 16:9 block and no bars above or below. To get the old letterboxed look back, set the environment variable `DM_FE_FILL=0` before launching.
 
+The picture is rendered at the screen's native pixels (3392×2130 in full screen on the built-in display, presented 1:1) instead of the old fixed 1600 wide being scaled up, so it is sharp. The 3392 width cap is the edge the game's video-memory budget holds - beyond it the game crashes - so wider screens (a 4K display, say) are clamped to that width proportionally.
+
 ## Mouse
 
 What it can do now:

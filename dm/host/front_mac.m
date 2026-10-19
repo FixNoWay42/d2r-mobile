@@ -34,13 +34,41 @@ static NSView *g_view;
 // Test switch DM_TEST_SCREEN_ASPECT=<w>x<h>: treat the main screen as this ratio (16x9 = the external 16:9 screen case)
 static double g_aspect = 16.0 / 9;   // 游戏画面比例（宽 ÷ 高） | aspect ratio of the game picture (width / height)
 static int g_full;                    // 1 = 真全屏已开 | 1 = true full screen is on
+// Mac App 的出图分辨率（像素）：按屏幕原生像素算，0 = 不覆盖（走原来的 16:9 常数，命令行宿主与 iOS 包用）。
+// 原先固定 1600 宽，全屏 drawable 是 3456×2168 像素，等于把 1600 宽的图放大 2.16 倍上屏——画面糊。
+// 现在按屏幕像素出图：全屏 1:1，窗口态超采样（downscale），都清晰。
+// 上限：游戏在窗口初始化时用这个值建交换链（main+0x211da30），之后只接受不超过它的新值，所以启动时给的就是最大那个。
+// Mac App render resolution in pixels, computed from the screen's native pixels; 0 = do not override (the old 16:9 constants, used by the command-line host and the iOS package).
+// It used to be a fixed 1600 wide, while the full-screen drawable is 3456x2168 pixels - a 2.16x upscale, i.e. the blurry picture.
+// Now it renders at screen pixels: 1:1 in full screen and supersampled (downscaled) windowed, both sharp.
+// Upper bound: the game creates its swapchain from this value at window init (main+0x211da30) and afterwards only accepts values not exceeding it, so the value given at startup is the largest one.
+static int g_res_w, g_res_h;
+#define RES_CAP_W 3392   // 出图宽上限：游戏显存预算撑得住的边界（3393 必崩，见下） | render width cap: the edge the game's video-memory budget holds (3393 always crashes, see below)
 static void full_setup(void) {
     if (!getenv("DM_APP") || getenv("DM_GAME_RES")) return;
     NSScreen *sc = NSScreen.mainScreen; double w = sc.frame.size.width, h = sc.frame.size.height - sc.safeAreaInsets.top; const char *e = getenv("DM_TEST_SCREEN_ASPECT"); unsigned tw, th;
-    if (e && sscanf(e, "%ux%u", &tw, &th) == 2 && tw && th) { w = tw; h = th; }
-    if (h <= 0 || w / h >= 16.0 / 9 - 0.01) { LOG("画面：主屏 %.0fx%.0f 不比 16:9 窄 → 全程 16:9", w, h); return; }
+    CGFloat scale = sc.backingScaleFactor > 0 ? sc.backingScaleFactor : 2;
+    if (e && sscanf(e, "%ux%u", &tw, &th) == 2 && tw && th) { w = tw; h = th; scale = 1; }   // 测试给的已经是像素口径 | the test value is already in pixels
+    if (h <= 0 || w <= 0) return;
+    if (w / h >= 16.0 / 9 - 0.01) {   // 16:9 或更宽的屏：全程 16:9，出图按屏宽、16:9 高 | 16:9 or wider: 16:9 throughout, render at screen width with 16:9 height
+        g_res_w = (int)(llround(w * scale)) & ~1; g_res_h = (int)(llround(w * scale * 9.0 / 16)) & ~1;
+        if (g_res_w > RES_CAP_W) { g_res_w = RES_CAP_W; g_res_h = (int)(llround(g_res_w * 9.0 / 16)) & ~1; }   // 同上限：4K 屏的 3840 会崩 | same cap: 3840 on a 4K screen would crash
+        LOG("画面：主屏 %.0fx%.0f 不比 16:9 窄 → 全程 16:9，出图 %dx%d 像素", w, h, g_res_w, g_res_h); return; }
     g_aspect = w / h; g_full = 1; dm_uiscreen_enable(DM_UISCREEN_BOTTOM);
-    LOG("画面：主屏全屏内容区 %.0fx%.0f（比例 %.3f）比 16:9 窄 → 真全屏：窗口锁这个比例，局内铺满、界面贴底，前端 16:9 留边", w, h, g_aspect);
+    // 出图按屏幕原生像素：全屏时 1:1，最清晰。屏幕上限是宽度——游戏显存预算（patch_nso.py 里 260 MB → 512 MB 那条）
+    // 撑不住超过 3392 宽的渲染目标：超了 main+0x174b018 返回空、main+0x17417a4 读空崩溃，进全屏即 SIGSEGV。
+    // 实测（真全屏这条路）：3392x2168、3392x2170 反复通过；3393x2168、3400x2160、3456x2168 必崩。与像素总数无关，宽度是主因。
+    // 超了就把宽夹到 3392、高按屏幕比例跟着缩，画面比例不变、不会崩。
+    // Render at the screen's native pixels: 1:1 in full screen, the sharpest. The cap is on width - the game's video-memory budget
+    // (the 260 MB -> 512 MB patch in patch_nso.py) cannot hold a render target wider than 3392: beyond that main+0x174b018 returns NULL,
+    // main+0x17417a4 reads it and it SIGSEGVs as soon as it goes full screen.
+    // Measured on this true-full-screen path: 3392x2168 and 3392x2170 pass repeatedly; 3393x2168, 3400x2160 and 3456x2168 always crash. Independent of the total pixel count; width is the main factor.
+    // Anything wider is clamped to 3392 with the height following the screen's aspect, so the picture keeps its ratio and cannot crash.
+    g_res_w = (int)(llround(w * scale)) & ~1; g_res_h = (int)(llround(w / g_aspect * scale)) & ~1;
+    if (g_res_w > RES_CAP_W) { g_res_w = RES_CAP_W; g_res_h = (int)(llround(g_res_w / g_aspect)) & ~1; }
+    { const char *r = getenv("DM_TEST_RES"); unsigned rw, rh;   // 测试开关：覆盖出图分辨率，仍走真全屏这条路（DM_GAME_RES 会让 full_setup 整个跳过，量不到这条路上的上限） | Test switch: override the render resolution but still take the true-full-screen path (DM_GAME_RES makes full_setup skip entirely, so it cannot measure this path's ceiling)
+      if (r && sscanf(r, "%ux%u", &rw, &rh) == 2 && rw && rh) { g_res_w = (int)rw; g_res_h = (int)rh; } }
+    LOG("画面：主屏全屏内容区 %.0fx%.0f（比例 %.3f）比 16:9 窄 → 真全屏：窗口锁这个比例，局内铺满、界面贴底；出图 %dx%d 像素（屏幕原生，宽上限 %d）", w, h, g_aspect, g_res_w, g_res_h, RES_CAP_W);
 }
 // 游戏画面在视图里的位置：按游戏画面比例放进视图（比例对得上就是整个视图；对不上的四周留黑边）
 // Where the game picture sits in the view: fitted into the view by the picture's aspect ratio (if the ratios match, the whole view; otherwise black bars around)
@@ -146,6 +174,7 @@ void *front_metal_layer(void) { return (__bridge void *)g_layer; }
 uint64_t front_game_res(int docked) {
     unsigned w, h; const char *e = getenv("DM_GAME_RES");
     if (e && sscanf(e, "%ux%u", &w, &h) == 2) return docked ? (uint64_t)h << 32 | w : (uint64_t)(h * 4 / 5) << 32 | (w * 4 / 5 + 3) / 4 * 4;
+    if (g_res_w > 0 && g_res_h > 0) return docked ? (uint64_t)g_res_h << 32 | (uint64_t)g_res_w : (uint64_t)(g_res_h * 4 / 5) << 32 | (uint64_t)(g_res_w * 4 / 5 + 3) / 4 * 4;   // Mac App：屏幕原生像素（见 full_setup） | Mac App: the screen's native pixels (see full_setup)
     if (g_full) return docked ? (uint64_t)(llround(1600 / g_aspect / 2) * 2) << 32 | 1600 : 720ull << 32 | (uint64_t)(llround(720 * g_aspect / 8) * 8);   // 真全屏：宽 1600、高按屏幕比例（16:10 → 1600x1004） | true full screen: width 1600, height by the screen's aspect ratio (16:10 -> 1600x1004)
     return docked ? 900ull << 32 | 1600 : 720ull << 32 | 1280;
 }
